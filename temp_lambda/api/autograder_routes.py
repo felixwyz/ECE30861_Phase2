@@ -51,6 +51,7 @@ class ArtifactMetadata(BaseModel):
 class ArtifactData(BaseModel):
     url: str
     download_url: Optional[str] = None
+    name: Optional[str] = None  # Autograder passes name in request body
 
 class Artifact(BaseModel):
     metadata: ArtifactMetadata
@@ -119,7 +120,7 @@ SESSION_TTL_SECONDS = 3600
 
 # Seed default admin - EXACT password from OpenAPI spec line 560
 _DEFAULT_ADMIN_USERNAME = 'ece30861defaultadminuser'
-_DEFAULT_ADMIN_PASSWORD = 'correcthorsebatterystaple123(!__+@**(A\'"`;DROP TABLE packages;'
+_DEFAULT_ADMIN_PASSWORD = 'correcthorsebatterystaple123(!__+@**(A\'"`;DROP TABLE artifacts;'
 
 def _hash_password(password: str, salt: str) -> str:
     return hashlib.sha256((salt + password).encode('utf-8')).hexdigest()
@@ -452,8 +453,12 @@ def create_artifact(
     if not artifact_data.url:
         raise HTTPException(status_code=400, detail="Missing url in artifact_data.")
     
-    # Extract name from URL using improved extraction
-    name = _extract_artifact_name(artifact_data.url)
+    # Use name from request body if provided, otherwise extract from URL
+    # Note: Autograder passes name in request body (per changelog v3.4.4)
+    if artifact_data.name:
+        name = artifact_data.name
+    else:
+        name = _extract_artifact_name(artifact_data.url)
     
     # Generate ID
     artifact_id = _generate_artifact_id()
