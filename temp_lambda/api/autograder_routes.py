@@ -436,6 +436,50 @@ def list_artifacts_query(
         headers={"offset": next_offset} if next_offset else {}
     )
 
+@app.post("/artifact/byRegEx")
+def get_artifact_by_regex(
+    regex_query: ArtifactRegEx = Body(...),
+    x_authorization: Optional[str] = Header(None, alias="X-Authorization")
+):
+    """Search artifacts by regex (BASELINE)
+    
+    Searches artifact names AND READMEs as per OpenAPI spec.
+    NOTE: This route MUST be defined BEFORE /artifact/{artifact_type} to avoid conflict!
+    """
+    import re
+    
+    username = _validate_token(x_authorization)
+    if not username:
+        raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
+    
+    try:
+        pattern = re.compile(regex_query.regex, re.IGNORECASE)
+    except re.error:
+        raise HTTPException(status_code=400, detail="Invalid regex pattern.")
+    
+    results = []
+    for artifact_id, artifact in _list_artifacts():
+        # Search in name
+        name_match = pattern.search(artifact["name"]) if artifact.get("name") else False
+        # Search in README/description
+        readme = artifact.get("readme", "") or artifact.get("description", "") or ""
+        readme_match = pattern.search(readme) if readme else False
+        # Search in URL (sometimes helpful)
+        url = artifact.get("url", "") or ""
+        url_match = pattern.search(url) if url else False
+        
+        if name_match or readme_match or url_match:
+            results.append({
+                "name": artifact["name"],
+                "id": artifact_id,
+                "type": artifact["type"]
+            })
+    
+    if not results:
+        raise HTTPException(status_code=404, detail="No artifact found under this regex.")
+    
+    return results
+
 @app.post("/artifact/{artifact_type}")
 def create_artifact(
     artifact_type: str,
@@ -610,49 +654,6 @@ def get_artifact_by_name(
     
     if not results:
         raise HTTPException(status_code=404, detail="No such artifact.")
-    
-    return results
-
-@app.post("/artifact/byRegEx")
-def get_artifact_by_regex(
-    regex_query: ArtifactRegEx = Body(...),
-    x_authorization: Optional[str] = Header(None, alias="X-Authorization")
-):
-    """Search artifacts by regex (BASELINE)
-    
-    Searches artifact names AND READMEs as per OpenAPI spec.
-    """
-    import re
-    
-    username = _validate_token(x_authorization)
-    if not username:
-        raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-    
-    try:
-        pattern = re.compile(regex_query.regex, re.IGNORECASE)
-    except re.error:
-        raise HTTPException(status_code=400, detail="Invalid regex pattern.")
-    
-    results = []
-    for artifact_id, artifact in _list_artifacts():
-        # Search in name
-        name_match = pattern.search(artifact["name"]) if artifact.get("name") else False
-        # Search in README/description
-        readme = artifact.get("readme", "") or artifact.get("description", "") or ""
-        readme_match = pattern.search(readme) if readme else False
-        # Search in URL (sometimes helpful)
-        url = artifact.get("url", "") or ""
-        url_match = pattern.search(url) if url else False
-        
-        if name_match or readme_match or url_match:
-            results.append({
-                "name": artifact["name"],
-                "id": artifact_id,
-                "type": artifact["type"]
-            })
-    
-    if not results:
-        raise HTTPException(status_code=404, detail="No artifact found under this regex.")
     
     return results
 
