@@ -1,0 +1,22 @@
+﻿
+	[RAW EVENT] {"version": "2.0", "routeKey": "$default", "rawPath": "/artifact/model", "rawQueryString": "", "headers": {"accept": "*/*", 
+"accept-encoding": "gzip, deflate", "content-length": "63", "content-type": "application/json", "host": 
+"2047fz40z1.execute-api.us-east-1.amazonaws.com", "user-agent": "python-requests/2.32.5", "x-amzn-trace-id": 
+"Root=1-69361d38-2dfaaac80fdc5e787a6e7978", "x-authorization": "bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZ
+G1pbnVzZXIiLCJpYXQiOjE3NjUxNTQxMDMsImV4cCI6MTc2NTE1NzcwMywiaXNfYWRtaW4iOnRydWV9.KwGIlOhn8dyO7JD5d29GmOtII8zP_P0CBVEYCTVQ0Y8", 
+"x-forwarded-for": "68.50.246.179", "x-forwarded-port": "443", "x-forwarded-proto": "https"}, "requestContext": {"accountId": 
+"957996720912", "apiId": "2047fz40z1", "domainName": "2047fz40z1.execute-api.us-east-1.amazonaws.com", "domainPrefix": "2047fz40z1", "http": 
+{"method": "POST", "path": "/artifact/model", "protocol": "HTTP/1.1", "sourceIp": "68.50.246.179", "userAgent": "python-requests/2.32.5"}, 
+"requestId": "VPmA1iI5oAMEMEQ=", "routeKey": "$default", "stage": "$default", "time": "08/Dec/2025:00:35:04 +0000", "timeEpoch": 
+1765154104168}, "body": "{\"url\": \"https://huggingface.co/google-bert/bert-base-uncased\"}", "isBase64Encoded": false}
+	[RAW EVENT] {"version": "2.0", "routeKey": "$default", "rawPath": "/artifact/byName/bert-base-uncased", "rawQueryString": "", "headers": 
+{"accept": "*/*", "accept-encoding": "gzip, deflate", "content-length": "0", "host": "2047fz40z1.execute-api.us-east-1.amazonaws.com", 
+"user-agent": "python-requests/2.32.5", "x-amzn-trace-id": "Root=1-69361d38-489d81b102098fbe0077ff2f", "x-authorization": "bearer eyJhbGciOiJ
+IUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlY2UzMDg2MWRlZmF1bHRhZG1pbnVzZXIiLCJpYXQiOjE3NjUxNTQxMDMsImV4cCI6MTc2NTE1NzcwMywiaXNfYWRtaW4iOnRydWV9.Kw
+GIlOhn8dyO7JD5d29GmOtII8zP_P0CBVEYCTVQ0Y8", "x-forwarded-for": "68.50.246.179", "x-forwarded-port": "443", "x-forwarded-proto": "https"}, 
+"requestContext": {"accountId": "957996720912", "apiId": "2047fz40z1", "domainName": "2047fz40z1.execute-api.us-east-1.amazonaws.com", 
+"domainPrefix": "2047fz40z1", "http": {"method": "GET", "path": "/artifact/byName/bert-base-uncased", "protocol": "HTTP/1.1", "sourceIp": 
+"68.50.246.179", "userAgent": "python-requests/2.32.5"}, "requestId": "VPmA3g5vIAMEYLQ=", "routeKey": "$default", "stage": "$default", 
+"time": "08/Dec/2025:00:35:04 +0000", "timeEpoch": 1765154104378}, "isBase64Encoded": false}
+
+
