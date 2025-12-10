@@ -120,7 +120,7 @@ SESSION_TTL_SECONDS = 3600
 
 # Seed default admin - EXACT password from OpenAPI spec line 560
 _DEFAULT_ADMIN_USERNAME = 'ece30861defaultadminuser'
-_DEFAULT_ADMIN_PASSWORD = 'correcthorsebatterystaple123(!__+@**(A\'"`;DROP TABLE artifacts;'
+_DEFAULT_ADMIN_PASSWORD = 'correcthorsebatterystaple123(!__+@**(A\'"`;DROP TABLE packages;'
 
 def _hash_password(password: str, salt: str) -> str:
     return hashlib.sha256((salt + password).encode('utf-8')).hexdigest()
@@ -633,21 +633,33 @@ def delete_artifact(
     
     return JSONResponse(status_code=200, content={"message": "Artifact is deleted."})
 
-@app.get("/artifact/byName/{name}")
+@app.get("/artifact/byName/{name:path}")
 def get_artifact_by_name(
     name: str,
     x_authorization: Optional[str] = Header(None, alias="X-Authorization")
 ):
-    """Get artifacts by name (NON-BASELINE)"""
+    """Get artifacts by name (NON-BASELINE)
+    
+    Note: Using {name:path} to allow names with slashes (e.g., google-bert/bert-base-uncased)
+    """
+    from urllib.parse import unquote
+    
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
     
+    # URL-decode the name in case it was encoded
+    decoded_name = unquote(name)
+    
     results = []
-    for artifact_id, artifact in _list_artifacts():
-        if artifact["name"] == name:
+    all_artifacts = _list_artifacts()
+    
+    for artifact_id, artifact in all_artifacts:
+        artifact_name = artifact.get("name", "")
+        # Try exact match first
+        if artifact_name == decoded_name:
             results.append({
-                "name": artifact["name"],
+                "name": artifact_name,
                 "id": artifact_id,
                 "type": artifact["type"]
             })
