@@ -1,0 +1,47 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [ main ]   # only deploy when main is updated
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -t ./package
+
+      - name: Build Lambda zip
+        working-directory: backend
+        run: |
+          # package/ has all deps, add source on top
+          cp -r . ./package_src
+          cd package
+          zip -r ../lambda_deployment.zip .
+          cd ../package_src
+          zip -r ../lambda_deployment.zip .  # add your source files
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWSKEY }}
+          aws-secret-access-key: ${{ secrets.AWSSECRET }}
+          aws-region: us-east-1
+
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name tmr-dev-api \
+            --zip-file fileb://backend/lambda_deployment.zip
