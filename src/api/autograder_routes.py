@@ -150,7 +150,7 @@ SESSION_TTL_SECONDS = 3600
 
 # Seed default admin
 _DEFAULT_ADMIN_USERNAME = 'ece30861defaultadminuser'
-_DEFAULT_ADMIN_PASSWORD = '''correcthorsebatterystaple123(!__+@**(A'"`;DROP TABLE packages;'''
+_DEFAULT_ADMIN_PASSWORD = 'correcthorsebatterystaple123(!__+@**(A;DROP TABLE packages)'
 
 def _hash_password(password: str, salt: str) -> str:
     return hashlib.sha256((salt + password).encode('utf-8')).hexdigest()
