@@ -3,7 +3,7 @@ Autograder-compatible routes for Phase 2.
 These endpoints match the OpenAPI specification exactly.
 """
 
-from fastapi import FastAPI, HTTPException, Header, Query, Body
+from fastapi import FastAPI, HTTPException, Header, Query, Body, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List, Dict, Any
@@ -42,6 +42,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str, request: Request):
+    return JSONResponse(
+        status_code=200,
+        content="OK",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 # ==================== AWS Setup ====================
 try:
