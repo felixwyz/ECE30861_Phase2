@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
 
           # Requirements file: adjust ONLY if your repo stores it elsewhere
-          REQ="requirements.txt"
+          REQ="requirements-lambda.txt"
           if [ ! -f "$REQ" ]; then
             echo "ERROR: $REQ not found. If your requirements.txt is elsewhere, update REQ."
             exit 1
@@ -34,7 +34,15 @@ jobs:
           mkdir -p build
 
           # Install dependencies into build/ (zip root)
-          pip install -r "$REQ" -t build
+          pip install -r "$REQ" -t build \
+            --only-binary=:all: \
+            --platform manylinux2014_x86_64 \
+            --implementation cp \
+            --python-version 310 \
+            --abi cp310
+            
+          python -c "import sys; sys.path.insert(0,'build'); import cryptography; print('cryptography in zip:', cryptography.__version__)"
+
 
           # Copy source into build/ (so build/lambda_handler.py exists)
           cp -r src/* build/
