@@ -1,9 +1,6 @@
 """
 Autograder-compatible routes for Phase 2.
 These endpoints match the OpenAPI specification exactly.
-
-This file ALSO includes an API v1 compatibility layer (/api/v1/*) so the
-course-provided frontend can work even when Lambda handler points to this file.
 """
 
 from fastapi import FastAPI, HTTPException, Header, Query, Body
@@ -38,11 +35,10 @@ app = FastAPI(
     description="API for ECE 461/Fall 2025/Project Phase 2: A Trustworthy Model Registry"
 )
 
-# ---------- CORS (needed for the frontend S3 site) ----------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # fine for this class project
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -88,6 +84,7 @@ class ArtifactRegEx(BaseModel):
 
 class User(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
+    
     name: str
     is_admin: bool = Field(default=False, alias="isAdmin")
 
@@ -96,6 +93,7 @@ class Secret(BaseModel):
 
 class AuthenticationRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
+    
     user: User = Field(alias="User")
     secret: Secret = Field(alias="Secret")
 
@@ -161,15 +159,15 @@ def _create_user(username: str, password: str, is_admin: bool = False):
                     'created_at': datetime.utcnow().isoformat()
                 })
                 return
-
+            
             # Check if exists (for non-admin users)
             response = table.get_item(Key={'model_id': f'USER#{username}'})
             if 'Item' in response:
                 return  # User already exists, silently return
-
+            
             salt = uuid.uuid4().hex
             pw_hash = _hash_password(password, salt)
-
+            
             table.put_item(Item={
                 'model_id': f'USER#{username}',
                 'password_hash': pw_hash,
@@ -180,7 +178,7 @@ def _create_user(username: str, password: str, is_admin: bool = False):
             return
         except Exception as e:
             print(f"DynamoDB error, falling back to memory: {e}")
-
+    
     # Fallback to memory
     if username in _users_store:
         return  # User already exists, silently return
@@ -202,27 +200,27 @@ def _get_user(username: str) -> Optional[Dict[str, Any]]:
                 return dict(response['Item'])
         except Exception as e:
             print(f"DynamoDB error: {e}")
-
+    
     return _users_store.get(username)
 
 def _validate_token(token: Optional[str]) -> Optional[str]:
     """Validate JWT token and return username if valid"""
     if not token:
         return None
-
+    
     # Remove 'bearer ' prefix if present
     if token.lower().startswith('bearer '):
         token = token[7:]
-
+    
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         username = payload.get('sub')
         exp = payload.get('exp')
-
+        
         # Check expiration
         if exp and datetime.fromtimestamp(exp) < datetime.utcnow():
             return None
-
+        
         return username
     except jwt.InvalidTokenError:
         return None
@@ -244,12 +242,12 @@ def _store_artifact(artifact_id: str, artifact_data: Dict[str, Any]):
                     item[key] = {k: Decimal(str(v)) if isinstance(v, float) else v for k, v in value.items()}
                 else:
                     item[key] = value
-
+            
             table.put_item(Item=item)
             return
         except Exception as e:
             print(f"DynamoDB error, falling back to memory: {e}")
-
+    
     _artifacts_store[artifact_id] = artifact_data
 
 def _get_artifact(artifact_id: str) -> Optional[Dict[str, Any]]:
@@ -268,7 +266,7 @@ def _get_artifact(artifact_id: str) -> Optional[Dict[str, Any]]:
                 return item
         except Exception as e:
             print(f"DynamoDB error: {e}")
-
+    
     return _artifacts_store.get(artifact_id)
 
 def _list_artifacts() -> List[Dict[str, Any]]:
@@ -291,7 +289,7 @@ def _list_artifacts() -> List[Dict[str, Any]]:
             return artifacts
         except Exception as e:
             print(f"DynamoDB error: {e}")
-
+    
     return list(_artifacts_store.items())
 
 def _delete_artifact(artifact_id: str):
@@ -302,7 +300,7 @@ def _delete_artifact(artifact_id: str):
             return
         except Exception as e:
             print(f"DynamoDB error: {e}")
-
+    
     _artifacts_store.pop(artifact_id, None)
 
 def _create_artifact(artifact: Dict[str, Any]):
@@ -330,7 +328,7 @@ def _clear_all_artifacts():
             return
         except Exception as e:
             print(f"DynamoDB error: {e}")
-
+    
     _artifacts_store.clear()
 
 def _clear_all_users():
@@ -347,7 +345,7 @@ def _clear_all_users():
             return
         except Exception as e:
             print(f"DynamoDB error: {e}")
-
+    
     _users_store.clear()
 
 # Seed admin user
@@ -356,141 +354,6 @@ try:
     print(f"✓ Seeded admin user: {_DEFAULT_ADMIN_USERNAME}")
 except ValueError:
     pass
-
-
-# ======================================================================
-# API v1 COMPATIBILITY LAYER (Frontend expects /api/v1/* from routes.py)
-# This layer is additive only and will not change autograder behavior.
-# ======================================================================
-
-def _infer_type_from_url(url: str) -> str:
-    u = (url or "").lower()
-    if "/datasets/" in u:
-        return "dataset"
-    if "/spaces/" in u:
-        return "code"
-    return "model"
-
-def _api_v1_model_view(artifact_id: str, artifact: Dict[str, Any]) -> Dict[str, Any]:
-    scores = artifact.get("scores", {}) or {}
-    # net_score is used in autograder; overall_score used by some frontend builds
-    overall = artifact.get("net_score")
-    if overall is None and scores:
-        try:
-            overall = sum(float(v) for v in scores.values()) / max(1, len(scores))
-        except Exception:
-            overall = 0.0
-    return {
-        "id": artifact_id,
-        "model_id": artifact_id,                  # some frontend versions use model_id
-        "name": artifact.get("name", ""),
-        "type": artifact.get("type") or _infer_type_from_url(artifact.get("url", "")),
-        "url": artifact.get("url", ""),
-        "scores": scores,
-        "overall_score": float(overall) if overall is not None else 0.0,
-        "uploaded_at": artifact.get("created_at") or artifact.get("uploaded_at") or datetime.utcnow().isoformat(),
-    }
-
-@app.get("/api/v1/health")
-def api_v1_health():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-        "service": "Trustworthy Model Registry",
-        "version": "api-v1-compat"
-    }
-
-@app.get("/api/v1/models")
-def api_v1_list_models(
-    limit: int = Query(10),
-    skip: int = Query(0),
-    type: Optional[str] = Query(None)
-):
-    all_items = _list_artifacts()  # [(id, dict), ...]
-    models = []
-    for aid, art in all_items:
-        view = _api_v1_model_view(aid, art)
-        if type:
-            if (view.get("type") or "").lower() != type.lower():
-                continue
-        models.append(view)
-
-    total = len(models)
-    paginated = models[skip:skip + limit]
-
-    return {
-        "models": paginated,
-        "count": total,
-        "limit": limit,
-        "skip": skip,
-        "message": "Artifacts retrieved successfully"
-    }
-
-@app.get("/api/v1/models/{model_id}")
-def api_v1_get_model(model_id: str):
-    art = _get_artifact(model_id)
-    if not art:
-        raise HTTPException(status_code=404, detail="Model not found")
-    return _api_v1_model_view(model_id, art)
-
-class _ApiV1Creds(BaseModel):
-    username: str
-    password: str
-
-@app.post("/api/v1/register")
-def api_v1_register(username: Optional[str] = Query(None), password: Optional[str] = Query(None), body: Optional[_ApiV1Creds] = Body(None)):
-    # Accept either query params OR JSON body
-    if body and (not username and not password):
-        username = body.username
-        password = body.password
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="username and password required")
-    _create_user(username, password, is_admin=False)
-    return {"status": "registered", "username": username}
-
-@app.post("/api/v1/login")
-def api_v1_login(username: Optional[str] = Query(None), password: Optional[str] = Query(None), body: Optional[_ApiV1Creds] = Body(None)):
-    # Accept either query params OR JSON body
-    if body and (not username and not password):
-        username = body.username
-        password = body.password
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="username and password required")
-
-    # Ensure default admin exists (idempotent)
-    if username == _DEFAULT_ADMIN_USERNAME:
-        try:
-            _create_user(_DEFAULT_ADMIN_USERNAME, _DEFAULT_ADMIN_PASSWORD, is_admin=True)
-        except Exception:
-            pass
-
-    user = _get_user(username)
-    if not user:
-        raise HTTPException(status_code=401, detail="invalid credentials")
-
-    pw_hash = _hash_password(password, user["salt"])
-    if pw_hash != user["password_hash"]:
-        raise HTTPException(status_code=401, detail="invalid credentials")
-
-    payload = {
-        'sub': username,
-        'iat': datetime.utcnow(),
-        'exp': datetime.utcnow() + timedelta(seconds=SESSION_TTL_SECONDS),
-        'is_admin': bool(user.get('is_admin', False))
-    }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-    # routes.py style response
-    return {"status": "ok", "token": token, "expires_in": SESSION_TTL_SECONDS}
-
-@app.post("/api/v1/logout")
-def api_v1_logout(token: Optional[str] = Query(None)):
-    # This backend uses JWT (stateless), so logout is effectively a no-op.
-    # Keeping endpoint for frontend compatibility.
-    if not token:
-        raise HTTPException(status_code=400, detail="token required")
-    return {"status": "logged_out"}
-
 
 # ==================== ENDPOINTS ====================
 
@@ -513,22 +376,22 @@ def reset_registry(x_authorization: Optional[str] = Header(None, alias="X-Author
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-
+    
     # Check if user is admin
     user = _get_user(username)
     if not user or not user.get("is_admin"):
         raise HTTPException(status_code=401, detail="You do not have permission to reset the registry.")
-
+    
     # Clear all artifacts and users
     _clear_all_artifacts()
     _clear_all_users()
-
+    
     # Re-seed admin
     try:
         _create_user(_DEFAULT_ADMIN_USERNAME, _DEFAULT_ADMIN_PASSWORD, is_admin=True)
     except:
         pass
-
+    
     return JSONResponse(status_code=200, content={"message": "Registry is reset."})
 
 @app.post("/artifacts")
@@ -541,12 +404,12 @@ def list_artifacts_query(
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-
+    
     results = []
-
+    
     # Get all artifacts
     all_artifacts = _list_artifacts()
-
+    
     # Handle wildcard query
     if len(queries) == 1 and queries[0].name == "*":
         query = queries[0]
@@ -558,7 +421,7 @@ def list_artifacts_query(
                 artifact_type_lower = artifact["type"].lower()
                 query_types_lower = [t.lower() for t in query.types]
                 type_match = artifact_type_lower in query_types_lower
-
+            
             if type_match:
                 results.append({
                     "name": artifact["name"],
@@ -580,22 +443,22 @@ def list_artifacts_query(
                         # Debug logging
                         if not type_match:
                             print(f"Query type mismatch: artifact '{artifact['name']}' has type '{artifact['type']}' (lower: '{artifact_type_lower}'), query types: {query.types} (lower: {query_types_lower})")
-
+                    
                     if type_match:
                         results.append({
                             "name": artifact["name"],
                             "id": artifact_id,
                             "type": artifact["type"]
                         })
-
+    
     # Apply offset for pagination
     start_idx = int(offset) if offset else 0
     page_size = 100  # Increased to handle batch queries
     paginated = results[start_idx:start_idx + page_size]
-
+    
     # Return with offset header
     next_offset = str(start_idx + page_size) if start_idx + page_size < len(results) else None
-
+    
     return JSONResponse(
         status_code=200,
         content=paginated,
@@ -609,27 +472,27 @@ def get_artifact_by_regex(
 ):
     """Search artifacts by regex (BASELINE)"""
     import re
-
+    
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-
+    
     try:
         pattern = re.compile(regex_query.regex, re.IGNORECASE)
     except re.error as e:
         raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {str(e)}")
-
+    
     results = []
     seen_ids = set()
-
+    
     for artifact_id, artifact in _list_artifacts():
         if artifact_id in seen_ids:
             continue
-
+            
         artifact_name = artifact.get("name", "")
         artifact_readme = artifact.get("readme", "")
         artifact_url = artifact.get("url", "")
-
+        
         if pattern.search(artifact_name) or pattern.search(artifact_readme) or pattern.search(artifact_url):
             results.append({
                 "name": artifact_name,
@@ -637,10 +500,10 @@ def get_artifact_by_regex(
                 "type": artifact["type"]
             })
             seen_ids.add(artifact_id)
-
+    
     if not results:
         raise HTTPException(status_code=404, detail="No artifact found under this regex.")
-
+    
     return JSONResponse(status_code=200, content=results)
 
 @app.post("/artifact/{artifact_type}")
@@ -653,14 +516,14 @@ def create_artifact(
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-
+    
     # Validate artifact type (case-insensitive)
     if artifact_type.lower() not in ["model", "dataset", "code"]:
         raise HTTPException(status_code=400, detail="Invalid artifact_type.")
-
+    
     if not artifact_data.url:
         raise HTTPException(status_code=400, detail="Missing url in artifact_data.")
-
+    
     # Use name from request body if provided (autograder sends this)
     if artifact_data.name:
         name = artifact_data.name
@@ -668,7 +531,7 @@ def create_artifact(
         # Extract name from URL as fallback
         url_clean = artifact_data.url.rstrip('/').replace('/tree/main', '').replace('/tree/master', '')
         parts = url_clean.split('/')
-
+        
         if 'huggingface.co' in artifact_data.url.lower():
             if len(parts) >= 2:
                 filtered_parts = [p for p in parts if p and p != 'datasets' and p != 'spaces']
@@ -683,21 +546,21 @@ def create_artifact(
             name = relevant_parts[-1] if relevant_parts else "unknown"
         else:
             name = parts[-1] if parts else "unknown"
-
+    
     # Generate ID
     artifact_id = _generate_artifact_id()
-
+    
     # Compute actual metrics using Phase 1 metrics system
     scores = {}
     net_score = 0.0
-
+    
     if METRICS_AVAILABLE:
         try:
             # Get all artifacts for treescore registry
             model_registry = {}
             for aid, art in _list_artifacts():
                 model_registry[aid] = art
-
+            
             # Compute all metrics
             print(f"✓ Computing REAL metrics for {artifact_type}: {artifact_data.url}")
             metrics_result = compute_artifact_metrics(
@@ -706,7 +569,7 @@ def create_artifact(
                 artifact_name=name,
                 model_registry=model_registry
             )
-
+            
             # Extract individual scores (use fallback for -1 failures)
             fallbacks = {
                 "bus_factor": 0.5,
@@ -725,10 +588,10 @@ def create_artifact(
                 metric_value = metrics_result.get(metric_name, -1)
                 # Use fallback if metric failed (returned -1) or is negative
                 scores[metric_name] = fallback_value if metric_value < 0 else max(0.0, metric_value)
-
+            
             net_score = metrics_result.get("net_score", sum(scores.values()) / len(scores))
             print(f"✓ REAL metrics computed - net_score: {net_score:.3f}, bus_factor: {scores['bus_factor']:.3f}")
-
+            
         except Exception as e:
             print(f"❌ Metrics computation FAILED - using fallback: {e}")
             # Fallback to default values
@@ -760,7 +623,7 @@ def create_artifact(
             "tree_score": 0.7
         }
         net_score = sum(scores.values()) / len(scores)
-
+    
     # Store artifact (preserve original case of artifact_type)
     artifact = {
         "name": name,
@@ -772,10 +635,10 @@ def create_artifact(
         "created_by": username
     }
     _store_artifact(artifact_id, artifact)
-
+    
     # Build response
     download_url = f"https://example.com/download/{artifact_id}"
-
+    
     response = {
         "metadata": {
             "name": name,
@@ -787,7 +650,7 @@ def create_artifact(
             "download_url": download_url
         }
     }
-
+    
     return JSONResponse(status_code=201, content=response)
 
 @app.get("/artifacts/{artifact_type}/{id}")
@@ -800,14 +663,14 @@ def get_artifact(
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-
+    
     artifact = _get_artifact(id)
     if not artifact:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
-
+    
     # Don't validate type - just return the artifact
     # The autograder may query with different types than what was uploaded
-
+    
     return {
         "metadata": {
             "name": artifact["name"],
@@ -831,21 +694,21 @@ def update_artifact(
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-
+    
     stored = _get_artifact(id)
     if not stored:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
-
+    
     # Validate name and id match
     if artifact.metadata.id != id or artifact.metadata.name != stored["name"]:
         raise HTTPException(status_code=400, detail="Name and ID must match existing artifact.")
-
+    
     # Update artifact
     stored["url"] = artifact.data.url
     stored["updated_at"] = datetime.utcnow().isoformat()
     stored["updated_by"] = username
     _store_artifact(id, stored)
-
+    
     return JSONResponse(status_code=200, content={"message": "Artifact is updated."})
 
 @app.delete("/artifacts/{artifact_type}/{id}")
@@ -858,21 +721,21 @@ def delete_artifact(
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-
+    
     # Validate artifact_type
     if artifact_type.lower() not in ["model", "dataset", "code"]:
         raise HTTPException(status_code=400, detail="Invalid artifact_type.")
-
+    
     artifact = _get_artifact(id)
     if not artifact:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
-
+    
     # Validate type matches (case-insensitive)
     if artifact["type"].lower() != artifact_type.lower():
         raise HTTPException(status_code=400, detail="Artifact type mismatch.")
-
+    
     _delete_artifact(id)
-
+    
     return JSONResponse(status_code=200, content={})
 
 @app.get("/artifact/byName/{name:path}")
@@ -881,18 +744,18 @@ def get_artifact_by_name(
     x_authorization: Optional[str] = Header(None, alias="X-Authorization")
 ):
     """Get artifacts by name (NON-BASELINE)
-
+    
     Using {name:path} to support names with slashes (e.g., google-bert/bert-base-uncased)
     """
     from urllib.parse import unquote
-
+    
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-
+    
     # URL-decode the name in case it's encoded
     decoded_name = unquote(name)
-
+    
     results = []
     for artifact_id, artifact in _list_artifacts():
         artifact_name = artifact.get("name", "")
@@ -903,10 +766,10 @@ def get_artifact_by_name(
                 "id": artifact_id,
                 "type": artifact["type"]
             })
-
+    
     if not results:
         raise HTTPException(status_code=404, detail="No such artifact.")
-
+    
     return JSONResponse(status_code=200, content=results)
 
 @app.get("/artifact/model/{id}/rate")
@@ -918,20 +781,20 @@ def rate_model(
     username = _validate_token(x_authorization)
     if not username:
         raise HTTPException(status_code=403, detail="Authentication failed due to invalid or missing AuthenticationToken.")
-
+    
     artifact = _get_artifact(id)
     if not artifact:
         raise HTTPException(status_code=404, detail="Artifact does not exist.")
-
+    
     scores = artifact.get("scores", {})
-
+    
     # Try to compute fresh metrics if URL is available
     if METRICS_AVAILABLE and artifact.get("url"):
         try:
             model_registry = {}
             for aid, art in _list_artifacts():
                 model_registry[aid] = art
-
+            
             print(f"✓ Computing REAL rating metrics for artifact {id}: {artifact['url']}")
             metrics_result = compute_artifact_metrics(
                 artifact_url=artifact["url"],
@@ -940,7 +803,7 @@ def rate_model(
                 model_registry=model_registry
             )
             print(f"✓ REAL rating metrics computed - net_score: {metrics_result.get('net_score', 0):.3f}")
-
+            
             # Build rating response from computed metrics
             rating = {
                 "name": artifact["name"],
@@ -1046,7 +909,7 @@ def rate_model(
             },
             "size_score_latency": 0.4
         }
-
+    
     return rating
 
 @app.get("/artifact/{artifact_type}/{id}/cost")
