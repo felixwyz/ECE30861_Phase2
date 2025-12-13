@@ -262,355 +262,474 @@
   </main>
 
   <script>
-    // --- CONFIG ---
-    const API_BASE_URL = "https://2047fz40z1.execute-api.us-east-1.amazonaws.com";
+  // --- CONFIG ---
+  const API_BASE_URL = "https://2047fz40z1.execute-api.us-east-1.amazonaws.com";
 
-    const $ = (id) => document.getElementById(id);
+  const $ = (id) => document.getElementById(id);
 
-    const loginStatusPill = $("login-status-pill");
-    const authStatus = $("auth-status");
-    const uploadStatus = $("upload-status");
-    const modelsStatus = $("models-status");
-    const modelsTbody = $("models-tbody");
+  const loginStatusPill = $("login-status-pill");
+  const authStatus = $("auth-status");
+  const uploadStatus = $("upload-status");
+  const modelsStatus = $("models-status");
+  const modelsTbody = $("models-tbody");
 
-    function setStatus(el, msg, type = "") {
-      el.textContent = msg || "";
-      el.classList.remove("ok", "error");
-      if (type) el.classList.add(type);
+  function setStatus(el, msg, type = "") {
+    el.textContent = msg || "";
+    el.classList.remove("ok", "error");
+    if (type) el.classList.add(type);
+  }
+
+  // --- Token management ---
+  function getToken() {
+    return window.localStorage.getItem("tmr_token") || "";
+  }
+
+  function setToken(token, username) {
+    if (token) {
+      window.localStorage.setItem("tmr_token", token); // token includes "bearer ..."
+      window.localStorage.setItem("tmr_username", username || "");
+      loginStatusPill.textContent = `Logged in as ${username || "user"}`;
+      loginStatusPill.classList.remove("logged-out");
+      loginStatusPill.classList.add("logged-in");
+    } else {
+      window.localStorage.removeItem("tmr_token");
+      window.localStorage.removeItem("tmr_username");
+      loginStatusPill.textContent = "Logged out";
+      loginStatusPill.classList.remove("logged-in");
+      loginStatusPill.classList.add("logged-out");
+    }
+  }
+
+  function initAuthState() {
+    const token = getToken();
+    const username = window.localStorage.getItem("tmr_username") || "";
+    if (token) {
+      loginStatusPill.textContent = `Logged in as ${username || "user"}`;
+      loginStatusPill.classList.add("logged-in");
+      loginStatusPill.classList.remove("logged-out");
+    } else {
+      loginStatusPill.textContent = "Logged out";
+      loginStatusPill.classList.remove("logged-in");
+      loginStatusPill.classList.add("logged-out");
+    }
+  }
+
+  // --- API wrapper ---
+  async function apiFetch(path, options = {}) {
+    const url = API_BASE_URL.replace(/\/$/, "") + path;
+    const headers = new Headers(options.headers || {});
+
+    const resp = await fetch(url, { ...options, headers });
+
+    const contentType = resp.headers.get("Content-Type") || "";
+    let data = null;
+
+    if (contentType.includes("application/json")) {
+      data = await resp.json().catch(() => null);
+    } else {
+      data = await resp.text().catch(() => null);
     }
 
-    // --- Token management ---
-    function getToken() {
-      return window.localStorage.getItem("tmr_token") || "";
+    if (!resp.ok) {
+      const errMsg =
+        (data && data.detail) ||
+        (typeof data === "string" ? data : "") ||
+        `Request failed with status ${resp.status}`;
+      throw new Error(errMsg);
     }
 
-    function setToken(token, username) {
-      if (token) {
-        window.localStorage.setItem("tmr_token", token);
-        window.localStorage.setItem("tmr_username", username || "");
-        loginStatusPill.textContent = `Logged in as ${username || "user"}`;
-        loginStatusPill.classList.remove("logged-out");
-        loginStatusPill.classList.add("logged-in");
-      } else {
-        window.localStorage.removeItem("tmr_token");
-        window.localStorage.removeItem("tmr_username");
-        loginStatusPill.textContent = "Logged out";
-        loginStatusPill.classList.remove("logged-in");
-        loginStatusPill.classList.add("logged-out");
-      }
+    return { data, headers: resp.headers };
+  }
+
+  function authHeaders() {
+    const token = getToken();
+    // autograder expects X-Authorization: bearer <jwt>
+    return token ? { "X-Authorization": token } : {};
+  }
+
+  // --- Small helpers ---
+  function isProbablyUrl(s) {
+    try {
+      const u = new URL(s);
+      return u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  function normalizeType(t) {
+    const x = String(t || "").toLowerCase();
+    if (x === "dataset") return "dataset";
+    if (x === "code") return "code";
+    return "model";
+  }
+
+  // --- Auth handlers (AUTOGRADER) ---
+  $("login-button").addEventListener("click", async () => {
+    const username = $("username-input").value.trim();
+    const password = $("password-input").value;
+
+    if (!username || !password) {
+      setStatus(authStatus, "Username and password required.", "error");
+      return;
     }
 
-    function initAuthState() {
-      const token = getToken();
-      const username = window.localStorage.getItem("tmr_username") || "";
-      if (token) {
-        loginStatusPill.textContent = `Logged in as ${username || "user"}`;
-        loginStatusPill.classList.add("logged-in");
-        loginStatusPill.classList.remove("logged-out");
-      } else {
-        loginStatusPill.textContent = "Logged out";
-        loginStatusPill.classList.remove("logged-in");
-        loginStatusPill.classList.add("logged-out");
-      }
-    }
-
-    // --- API wrapper ---
-    async function apiFetch(path, options = {}) {
-      const url = API_BASE_URL.replace(/\/$/, "") + path;
-
-      // IMPORTANT: do NOT automatically add Content-Type or Authorization.
-      // Let the browser choose defaults so the request stays "simple"
-      // and avoids a CORS preflight.
-      const headers = new Headers(options.headers || {});
-
-      const resp = await fetch(url, {
-        ...options,
-        headers,
+    setStatus(authStatus, "Logging in…");
+    try {
+      const body = JSON.stringify({
+        User: { name: username },
+        Secret: { password: password },
       });
 
-      let data = null;
-      const contentType = resp.headers.get("Content-Type") || "";
-      if (contentType.includes("application/json")) {
-        data = await resp.json().catch(() => null);
-      } else {
-        data = await resp.text().catch(() => null);
+      const { data: tokenText } = await apiFetch("/authenticate", {
+        method: "PUT",
+        body,
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const token = String(tokenText || "").trim();
+      if (!token.toLowerCase().startsWith("bearer ")) {
+        throw new Error("Login failed: backend did not return a bearer token.");
       }
 
-      if (!resp.ok) {
-        const errMsg =
-          (data && data.detail) ||
-          (typeof data === "string" ? data : "") ||
-          `Request failed with status ${resp.status}`;
-        throw new Error(errMsg);
-      }
-
-      return data;
-    }
-
-    // --- Auth handlers ---
-    $("login-button").addEventListener("click", async () => {
-      const username = $("username-input").value.trim();
-      const password = $("password-input").value;
-
-      if (!username || !password) {
-        setStatus(authStatus, "Username and password required.", "error");
-        return;
-      }
-
-      setStatus(authStatus, "Logging in…");
-      try {
-        // Backend: POST /api/v1/login?username=...&password=...
-        const data = await apiFetch(
-          `/api/v1/login?username=${encodeURIComponent(
-            username
-          )}&password=${encodeURIComponent(password)}`,
-          {
-            method: "POST",
-          }
-        );
-
-        const token = data.token;
-        if (!token) {
-          throw new Error("No token returned from server.");
-        }
-
-        setToken(token, username);
-        setStatus(authStatus, "Login successful.", "ok");
-        loadModels();
-      } catch (err) {
-        console.error(err);
-        setToken("", "");
-        setStatus(authStatus, String(err.message || err), "error");
-      }
-    });
-
-    $("logout-button").addEventListener("click", async () => {
-      const token = getToken();
-      if (!token) {
-        setToken("", "");
-        setStatus(authStatus, "Already logged out.", "ok");
-        return;
-      }
-
-      setStatus(authStatus, "Logging out…");
-      try {
-        await apiFetch(
-          `/api/v1/logout?token=${encodeURIComponent(token)}`,
-          { method: "POST" }
-        );
-      } catch (err) {
-        console.warn("Logout error:", err);
-      }
+      setToken(token, username);
+      setStatus(authStatus, "Login successful.", "ok");
+      loadModels();
+    } catch (err) {
+      console.error(err);
       setToken("", "");
-      setStatus(authStatus, "Logged out.", "ok");
-    });
+      setStatus(authStatus, String(err.message || err), "error");
+    }
+  });
 
-    // --- Upload handler ---
-    $("upload-button").addEventListener("click", async () => {
-      const name = $("model-name-input").value.trim();
-      const fileInput = $("model-file-input");
-      const isSensitive = $("model-sensitive-input").checked; // not used yet
+  $("logout-button").addEventListener("click", () => {
+    // Autograder API doesn't provide logout; clearing local token is enough.
+    setToken("", "");
+    setStatus(authStatus, "Logged out (local token cleared).", "ok");
+    cachedModels = [];
+    renderModels([]);
+    setStatus(modelsStatus, "Log in to load models.", "error");
+  });
 
-      if (!getToken()) {
-        setStatus(uploadStatus, "You must be logged in to upload.", "error");
-        return;
-      }
-      if (!name) {
-        setStatus(uploadStatus, "Model name is required.", "error");
-        return;
-      }
-      if (!fileInput.files || fileInput.files.length === 0) {
-        setStatus(uploadStatus, "Please choose a .zip file to upload.", "error");
-        return;
-      }
-
-      const file = fileInput.files[0];
-      setStatus(uploadStatus, "Uploading… this may take a bit.");
-
+  // --- Repurpose Upload UI to "Register by URL" ---
+  function retrofitUploadUI() {
+    // Change the "Model package (.zip)" input into a plain text URL input (same element ID).
+    const fileInput = $("model-file-input");
+    if (fileInput) {
       try {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("model_id", name);
-        formData.append("name", name);
-        formData.append("description", "");
-        formData.append("version", "1.0.0");
-
-        const data = await apiFetch("/api/v1/models/upload", {
-          method: "POST",
-          body: formData,
-          headers: {}, // let browser set multipart boundaries
-        });
-
-        setStatus(
-          uploadStatus,
-          `Upload succeeded. Model ID: ${data.model_id || name}`,
-          "ok"
-        );
-        fileInput.value = "";
-        $("model-name-input").value = "";
-        $("model-sensitive-input").checked = false;
-
-        loadModels();
-      } catch (err) {
-        console.error(err);
-        setStatus(uploadStatus, String(err.message || err), "error");
+        fileInput.type = "text";
+      } catch {
+        // Some browsers might block changing file->text; fallback handled below.
       }
-    });
+      fileInput.value = "";
+      fileInput.removeAttribute("accept");
+      fileInput.setAttribute("placeholder", "https://huggingface.co/... or https://github.com/...");
 
-    // --- Models list / search ---
-    $("refresh-button").addEventListener("click", () => {
-      loadModels();
-    });
+      // Update its label text if present
+      const fileLabel = document.querySelector('label[for="model-file-input"]');
+      if (fileLabel) fileLabel.textContent = "Model URL (HuggingFace / GitHub)";
+    }
 
-    $("search-input").addEventListener("input", () => {
-      filterModels();
-    });
+    // Update the description text to match URL-based flow
+    const uploadTitle = document.querySelector("#upload-title");
+    if (uploadTitle) uploadTitle.textContent = "Register Model";
 
-    let cachedModels = [];
-
-    function renderModels(models) {
-      modelsTbody.innerHTML = "";
-      if (!models || models.length === 0) {
-        const row = document.createElement("tr");
-        const cell = document.createElement("td");
-        cell.colSpan = 4;
-        cell.textContent = "No models found.";
-        cell.style.color = "#9ca3af";
-        row.appendChild(cell);
-        modelsTbody.appendChild(row);
-        return;
-      }
-
-      for (const m of models) {
-        const tr = document.createElement("tr");
-
-        const name =
-          m.name || m.model_name || m.id || m.model_id || "(unnamed)";
-        const type = m.type || "model";
-        const isSensitive = false; // unknown for now
-
-        const tdName = document.createElement("td");
-        tdName.textContent = name;
-        tr.appendChild(tdName);
-
-        const tdType = document.createElement("td");
-        tdType.textContent = type;
-        tr.appendChild(tdType);
-
-        const tdSens = document.createElement("td");
-        const badge = document.createElement("span");
-        badge.classList.add("badge");
-        if (isSensitive) {
-          badge.classList.add("sensitive");
-          badge.textContent = "Sensitive";
-        } else {
-          badge.textContent = "Unknown";
-        }
-        tdSens.appendChild(badge);
-        tr.appendChild(tdSens);
-
-        const tdActions = document.createElement("td");
-        const fullBtn = document.createElement("button");
-        fullBtn.textContent = "Download";
-        fullBtn.classList.add("secondary");
-        fullBtn.addEventListener("click", () => {
-          downloadModel(m);
-        });
-        tdActions.appendChild(fullBtn);
-
-        tr.appendChild(tdActions);
-        modelsTbody.appendChild(tr);
+    // Also adjust the helper paragraph (the first <p> inside upload card)
+    const uploadCard = uploadTitle ? uploadTitle.closest(".card") : null;
+    if (uploadCard) {
+      const ps = uploadCard.querySelectorAll("p");
+      if (ps && ps.length > 0) {
+        ps[0].textContent =
+          "Register a model/dataset/code by URL. The registry will store metadata and allow rating via the backend.";
       }
     }
 
-    function filterModels() {
-      const q = $("search-input").value.trim().toLowerCase();
-      if (!q) {
-        renderModels(cachedModels);
-        return;
+    // Change the button label
+    const uploadBtn = $("upload-button");
+    if (uploadBtn) uploadBtn.textContent = "Register";
+  }
+
+  // --- Register handler (AUTOGRADER) ---
+  $("upload-button").addEventListener("click", async () => {
+    const token = getToken();
+    if (!token) {
+      setStatus(uploadStatus, "You must be logged in to register an artifact.", "error");
+      return;
+    }
+
+    const nameOrHint = $("model-name-input").value.trim();
+    const urlInput = $("model-file-input");
+    const urlValue = (urlInput && urlInput.value ? urlInput.value.trim() : "");
+
+    if (!urlValue) {
+      setStatus(uploadStatus, "Please paste a URL to register.", "error");
+      return;
+    }
+    if (!isProbablyUrl(urlValue)) {
+      setStatus(uploadStatus, "That doesn't look like a valid http(s) URL.", "error");
+      return;
+    }
+
+    // If user typed something like "dataset:" or "code:" allow quick override, else assume "model"
+    // Example: "dataset" in name field -> dataset type
+    let artifactType = "model";
+    const lower = nameOrHint.toLowerCase();
+    if (lower === "dataset" || lower.startsWith("dataset ")) artifactType = "dataset";
+    if (lower === "code" || lower.startsWith("code ")) artifactType = "code";
+
+    setStatus(uploadStatus, "Registering…");
+
+    try {
+      // autograder endpoint: POST /artifact/{artifact_type}
+      // Body: { url: "...", name?: "..." }
+      const payload = {
+        url: urlValue,
+      };
+
+      // Optional: if they typed a real name (and it's not the type override), pass it
+      if (nameOrHint && nameOrHint !== "dataset" && nameOrHint !== "code" && nameOrHint !== "model") {
+        payload.name = nameOrHint;
       }
-      const filtered = cachedModels.filter((m) => {
-        const name =
-          (m.name || m.model_name || m.id || m.model_id || "").toLowerCase();
-        return name.includes(q);
+
+      const { data } = await apiFetch(`/artifact/${encodeURIComponent(artifactType)}`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
       });
-      renderModels(filtered);
-    }
 
-    async function loadModels() {
-      setStatus(modelsStatus, "Loading models…");
-      try {
-        const data = await apiFetch("/api/v1/models?limit=50&skip=0", {
-          method: "GET",
-        });
+      // Response includes metadata.id usually
+      const newId = data?.metadata?.id || data?.metadata?.ID || "";
+      const newName = data?.metadata?.name || data?.metadata?.Name || payload.name || "(registered)";
 
-        const models = data.models || [];
-        cachedModels = models;
-        renderModels(models);
-        filterModels();
-        setStatus(modelsStatus, `Loaded ${models.length} model(s).`, "ok");
-      } catch (err) {
-        console.error(err);
-        setStatus(modelsStatus, String(err.message || err), "error");
-        cachedModels = [];
-        renderModels([]);
-      }
-    }
+      setStatus(
+        uploadStatus,
+        `Registered ${artifactType}: ${newName}${newId ? ` (ID: ${newId})` : ""}`,
+        "ok"
+      );
 
-    // --- Download handler ---
-    async function downloadModel(model) {
-      const token = getToken();
-      if (!token) {
-        setStatus(modelsStatus, "You must be logged in to download.", "error");
-        return;
-      }
+      // Clear inputs
+      $("model-name-input").value = "";
+      if (urlInput) urlInput.value = "";
+      $("model-sensitive-input").checked = false;
 
-      const id =
-        model.model_id || model.id || model.name || model.model_name || "model";
-
-      setStatus(modelsStatus, `Preparing download for ${id}…`);
-
-      try {
-        const url =
-          API_BASE_URL.replace(/\/$/, "") +
-          `/api/v1/models/${encodeURIComponent(
-            id
-          )}/download?variant=full&token=${encodeURIComponent(token)}`;
-
-        const resp = await fetch(url, { method: "GET" });
-
-        if (!resp.ok) {
-          const text = await resp.text();
-          throw new Error(
-            `Download failed with status ${resp.status}: ${text.substring(
-              0,
-              200
-            )}`
-          );
-        }
-
-        const blob = await resp.blob();
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = downloadUrl;
-        a.download = `${id}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(downloadUrl);
-
-        setStatus(modelsStatus, `Download started for ${id}.`, "ok");
-      } catch (err) {
-        console.error(err);
-        setStatus(modelsStatus, String(err.message || err), "error");
-      }
-    }
-
-    // --- Init ---
-    window.addEventListener("DOMContentLoaded", () => {
-      initAuthState();
       loadModels();
+    } catch (err) {
+      console.error(err);
+      setStatus(uploadStatus, String(err.message || err), "error");
+    }
+  });
+
+  // --- Models list / search ---
+  $("refresh-button").addEventListener("click", () => loadModels());
+  $("search-input").addEventListener("input", () => filterModels());
+
+  let cachedModels = [];
+
+  function renderModels(models) {
+    modelsTbody.innerHTML = "";
+
+    if (!models || models.length === 0) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 4;
+      cell.textContent = "No models found.";
+      cell.style.color = "#9ca3af";
+      row.appendChild(cell);
+      modelsTbody.appendChild(row);
+      return;
+    }
+
+    for (const m of models) {
+      const tr = document.createElement("tr");
+
+      const name = m.name || "(unnamed)";
+      const type = normalizeType(m.type);
+      const id = m.id || "";
+
+      const tdName = document.createElement("td");
+      tdName.textContent = name;
+      tr.appendChild(tdName);
+
+      const tdType = document.createElement("td");
+      tdType.textContent = type;
+      tr.appendChild(tdType);
+
+      const tdSens = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.classList.add("badge");
+      badge.textContent = "N/A";
+      tdSens.appendChild(badge);
+      tr.appendChild(tdSens);
+
+      const tdActions = document.createElement("td");
+      tdActions.classList.add("row");
+
+      // Details button (fetches artifact)
+      const detailsBtn = document.createElement("button");
+      detailsBtn.textContent = "Details";
+      detailsBtn.classList.add("secondary");
+      detailsBtn.addEventListener("click", async () => {
+        if (!id) return;
+        setStatus(modelsStatus, `Loading details for ${id}…`);
+        try {
+          const { data } = await apiFetch(`/artifacts/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
+            method: "GET",
+            headers: { ...authHeaders() },
+          });
+
+          const url = data?.data?.url || "";
+          const meta = data?.metadata || {};
+          const pretty = [
+            `Name: ${meta.name || meta.Name || name}`,
+            `ID: ${meta.id || meta.ID || id}`,
+            `Type: ${meta.type || meta.Type || type}`,
+            url ? `URL: ${url}` : "",
+          ].filter(Boolean).join("\n");
+
+          alert(pretty);
+          setStatus(modelsStatus, `Details loaded for ${id}.`, "ok");
+        } catch (err) {
+          console.error(err);
+          setStatus(modelsStatus, String(err.message || err), "error");
+        }
+      });
+      tdActions.appendChild(detailsBtn);
+
+      // Rate button (models only)
+      const rateBtn = document.createElement("button");
+      rateBtn.textContent = "Rate";
+      rateBtn.classList.add("secondary");
+      rateBtn.disabled = (type !== "model" || !id);
+      rateBtn.addEventListener("click", async () => {
+        if (!id) return;
+        setStatus(modelsStatus, `Rating model ${id}…`);
+        try {
+          const { data } = await apiFetch(`/artifact/model/${encodeURIComponent(id)}/rate`, {
+            method: "GET",
+            headers: { ...authHeaders() },
+          });
+
+          // data is a big rating object; show the main fields
+          const net = data?.net_score ?? data?.NetScore;
+          const bus = data?.bus_factor ?? data?.BusFactor;
+          const lic = data?.license ?? data?.LicenseScore;
+          const ramp = data?.ramp_up_time ?? data?.RampUp;
+
+          const summary = [
+            `net_score: ${net}`,
+            `bus_factor: ${bus}`,
+            `license: ${lic}`,
+            `ramp_up_time: ${ramp}`,
+          ].join(" | ");
+
+          setStatus(modelsStatus, `Rated ${id}: ${summary}`, "ok");
+        } catch (err) {
+          console.error(err);
+          setStatus(modelsStatus, String(err.message || err), "error");
+        }
+      });
+      tdActions.appendChild(rateBtn);
+
+      // Open URL button (needs details first; we'll fetch and open)
+      const openBtn = document.createElement("button");
+      openBtn.textContent = "Open URL";
+      openBtn.classList.add("secondary");
+      openBtn.disabled = !id;
+      openBtn.addEventListener("click", async () => {
+        if (!id) return;
+        setStatus(modelsStatus, `Fetching URL for ${id}…`);
+        try {
+          const { data } = await apiFetch(`/artifacts/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
+            method: "GET",
+            headers: { ...authHeaders() },
+          });
+
+          const url = data?.data?.url || "";
+          if (!url) throw new Error("No URL stored for this artifact.");
+          window.open(url, "_blank", "noopener,noreferrer");
+          setStatus(modelsStatus, `Opened URL for ${id}.`, "ok");
+        } catch (err) {
+          console.error(err);
+          setStatus(modelsStatus, String(err.message || err), "error");
+        }
+      });
+      tdActions.appendChild(openBtn);
+
+      tr.appendChild(tdActions);
+      modelsTbody.appendChild(tr);
+    }
+  }
+
+  function filterModels() {
+    const q = $("search-input").value.trim().toLowerCase();
+    if (!q) {
+      renderModels(cachedModels);
+      return;
+    }
+    const filtered = cachedModels.filter((m) => {
+      const name = (m.name || "").toLowerCase();
+      const type = (m.type || "").toLowerCase();
+      const id = (m.id || "").toLowerCase();
+      return name.includes(q) || type.includes(q) || id.includes(q);
     });
-  </script>
+    renderModels(filtered);
+  }
+
+  async function loadModels() {
+    setStatus(modelsStatus, "Loading models…");
+
+    const token = getToken();
+    if (!token) {
+      setStatus(modelsStatus, "Log in to load models.", "error");
+      cachedModels = [];
+      renderModels([]);
+      return;
+    }
+
+    try {
+      // POST /artifacts with wildcard query
+      // We'll request all types so the UI still works if you register dataset/code too.
+      const body = JSON.stringify([{ name: "*", types: ["model", "dataset", "code"] }]);
+
+      const { data, headers } = await apiFetch("/artifacts", {
+        method: "POST",
+        body,
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
+      });
+
+      const items = Array.isArray(data) ? data : [];
+      cachedModels = items;
+
+      renderModels(items);
+      filterModels();
+
+      // Offset header may be present for pagination
+      const offset = headers.get("offset");
+      setStatus(
+        modelsStatus,
+        `Loaded ${items.length} item(s).${offset ? " (More available; backend supports pagination.)" : ""}`,
+        "ok"
+      );
+    } catch (err) {
+      console.error(err);
+      setStatus(modelsStatus, String(err.message || err), "error");
+      cachedModels = [];
+      renderModels([]);
+    }
+  }
+
+  // --- Init ---
+  window.addEventListener("DOMContentLoaded", () => {
+    initAuthState();
+    retrofitUploadUI();
+    loadModels();
+  });
+</script>
 </body>
 </html>
